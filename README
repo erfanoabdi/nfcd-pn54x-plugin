@@ -1,0 +1,16 @@
+nfcd plugin
+===========
+
+Works with pn54x Android driver which essentially passes raw data
+packets back and forth beetween user mode and NCI compatible chip.
+The device name can be configured via /etc/nfcd/plugins/pn54x.conf
+file like this:
+
+  [Plugin]
+  Device=/dev/pn547
+
+The default device is /dev/pn54x
+
+Note that 64-bit driver often needs to be patched to allow calls
+from 32-bit nfcd by adding compat_ioctl entry pointing to the same
+function as unlocked_ioctl.
