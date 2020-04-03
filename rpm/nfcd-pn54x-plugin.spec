@@ -1,5 +1,5 @@
 Name: nfcd-pn54x-plugin
-Version: 1.0.0
+Version: 1.0.1
 Release: 0
 Summary: NFC plugin for pn54x
 Group: Development/Libraries
