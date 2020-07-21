@@ -2,7 +2,6 @@ Name: nfcd-pn54x-plugin
 Version: 1.0.1
 Release: 0
 Summary: NFC plugin for pn54x
-Group: Development/Libraries
 License: BSD
 URL: https://github.com/mer-hybris/nfcd-pn54x-plugin
 Source: %{name}-%{version}.tar.bz2
@@ -13,6 +12,8 @@ BuildRequires: pkgconfig(libncicore)
 BuildRequires: pkgconfig(libnciplugin)
 BuildRequires: pkgconfig(nfcd-plugin) >= %{nfcd_version}
 Requires: nfcd >= %{nfcd_version}
+
+%define plugin_dir %{_libdir}/nfcd/plugins
 
 %description
 NFC plugin that talks directly to pn54x driver.
@@ -25,7 +26,7 @@ make %{_smp_mflags} KEEP_SYMBOLS=1 release
 
 %install
 rm -rf %{buildroot}
-make install DESTDIR=%{buildroot}
+make DESTDIR=%{buildroot} PLUGIN_DIR=%{plugin_dir} install
 
 %check
 make test
@@ -38,5 +39,5 @@ systemctl reload-or-try-restart nfcd.service ||:
 
 %files
 %defattr(-,root,root,-)
-%dir %{_libdir}/nfcd/plugins
-%{_libdir}/nfcd/plugins/*.so
+%dir %{plugin_dir}
+%{plugin_dir}/*.so
