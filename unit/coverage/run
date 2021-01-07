@@ -4,7 +4,7 @@
 #
 
 TESTS="\
-pn547_io"
+pn54x_io"
 
 function err() {
     echo "*** ERROR!" $1
@@ -46,4 +46,4 @@ LIB_COV="$COV_DIR/lib.gcov"
 rm -f "$FULL_COV" "$LIB_COV"
 lcov $LCOV_OPT -c -d "$LIB_DIR/build/coverage" -b "$LIB_DIR/src" -o "$FULL_COV" || exit 1
 lcov $LCOV_OPT -e "$FULL_COV" "$LIB_DIR/src/*" -o "$LIB_COV" || exit 1
-genhtml $GENHTML_OPT "$LIB_COV" -t "PN547 nfcd plugin" --output-directory "$COV_DIR/report" || exit 1
+genhtml $GENHTML_OPT "$LIB_COV" -t "pn54x nfcd plugin" --output-directory "$COV_DIR/report" || exit 1
