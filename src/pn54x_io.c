@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2019-2020 Jolla Ltd.
- * Copyright (C) 2019-2020 Slava Monich <slava.monich@jolla.com>
+ * Copyright (C) 2019-2021 Jolla Ltd.
+ * Copyright (C) 2019-2021 Slava Monich <slava.monich@jolla.com>
  * Copyright (C) 2019 Open Mobile Platform LLC.
  *
  * You may use this file under the terms of the BSD license as follows:
@@ -52,7 +52,7 @@
 #include <sys/wait.h>
 
 #define PN54X_MAX_PACKET_SIZE (512)
-#define NCI_PACKET_HEADFER_SIZE (3)
+#define NCI_PACKET_HEADER_SIZE (3)
 
 #define PN54X_SET_PWR   _IOW(0xe9, 0x01, unsigned int)
 #define PN54X_PWR_ON    (1)
@@ -275,16 +275,16 @@ pn54x_io_read_packet_size(
     gsize size)
 {
     /* Octet 2 is the payload length in both control and data packets */
-    if (size >= NCI_PACKET_HEADFER_SIZE) {
+    if (size >= NCI_PACKET_HEADER_SIZE) {
         const guint8* pkt = buf;
-        const guint max_payload = size - NCI_PACKET_HEADFER_SIZE;
+        const guint max_payload = size - NCI_PACKET_HEADER_SIZE;
 
         /* Driver fills unused part of the buffer with 0xff's */
         if (pkt[0] != 0xff) {
             const guint payload_len = pkt[2];
 
             if (payload_len <= max_payload) {
-                return NCI_PACKET_HEADFER_SIZE + payload_len;
+                return NCI_PACKET_HEADER_SIZE + payload_len;
             }
         }
     }
