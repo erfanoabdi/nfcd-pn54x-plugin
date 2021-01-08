@@ -278,37 +278,13 @@ pn54x_io_read_packet_size(
     if (size >= NCI_PACKET_HEADER_SIZE) {
         const guint8* pkt = buf;
         const guint max_payload = size - NCI_PACKET_HEADER_SIZE;
+        const guint payload_len = pkt[2];
 
-        /* Driver fills unused part of the buffer with 0xff's */
-        if (pkt[0] != 0xff) {
-            const guint payload_len = pkt[2];
-
-            if (payload_len <= max_payload) {
-                return NCI_PACKET_HEADER_SIZE + payload_len;
-            }
+        if (payload_len <= max_payload) {
+            return NCI_PACKET_HEADER_SIZE + payload_len;
         }
     }
     return 0;
-}
-
-static
-gboolean
-pn54x_io_read_done(
-    const void* buf,
-    gsize size)
-{
-    /* Driver fills unused part of the buffer with 0xff's */
-    const guint8* ptr = buf;
-    const guint8* end = ptr + size;
-
-    while (ptr < end) {
-        if (*ptr++ != 0xff) {
-            /* There's something in there */
-            return FALSE;
-        }
-    }
-    /* All 0xff's (or nothing at all) */
-    return TRUE;
 }
 
 static
@@ -332,18 +308,29 @@ pn54x_io_read_handle(
         ptr = read_buf->data;
         nbytes = read_buf->len;
     } else {
-        /* We must be at the NCI packet boundary */
         ptr = buf;
         nbytes = size;
+
+        /* NCI packet can't start with 0xff */
+        while (nbytes > 0 && *ptr == 0xff) {
+            ptr++;
+            nbytes--;
+        }
     }
 
     while ((pktsiz = pn54x_io_read_packet_size(ptr, nbytes)) > 0) {
         client->fn->read(client, ptr, pktsiz);
         ptr += pktsiz;
         nbytes -= pktsiz;
+
+        /* Driver fills unused part of the buffer with 0xff's */
+        while (nbytes > 0 && *ptr == 0xff) {
+            ptr++;
+            nbytes--;
+        }
     }
 
-    if (pn54x_io_read_done(ptr, nbytes)) {
+    if (!nbytes) {
         g_byte_array_set_size(read_buf, 0);
     } else if (read_buf->len) {
         /* Erase consumed data from read_buf */

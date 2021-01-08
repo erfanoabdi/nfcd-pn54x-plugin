@@ -1,7 +1,7 @@
 /*
- * Copyright (C) 2019 Jolla Ltd.
+ * Copyright (C) 2019-2021 Jolla Ltd.
+ * Copyright (C) 2019-2021 Slava Monich <slava.monich@jolla.com>
  * Copyright (C) 2019 Open Mobile Platform LLC.
- * Copyright (C) 2019 Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of the BSD license as follows:
  *
@@ -41,6 +41,7 @@
 #include "pn54x_io.h"
 
 #include <gutil_macros.h>
+#include <gutil_misc.h>
 #include <gutil_log.h>
 
 #include <errno.h>
@@ -115,6 +116,15 @@ test_no_write(
     g_assert_not_reached();
 }
 
+static
+gboolean
+test_unblock(
+    gpointer user_data)
+{
+    test_quit_later((GMainLoop*) user_data);
+    return G_SOURCE_REMOVE;
+}
+
 /*==========================================================================*
  * null
  *==========================================================================*/
@@ -143,49 +153,71 @@ test_open_error(
 }
 
 /*==========================================================================*
- * basic_read
+ * read
  *==========================================================================*/
 
-typedef struct test_basic_read_data {
+typedef struct test_read_input_chunk {
+    GUtilData data;
+    gboolean has_packet;
+} TestReadInputChunk;
+
+typedef struct test_read_config {
+    const char* name;
+    const TestReadInputChunk* in;
+    guint in_count;
+    const GUtilData* out;
+    guint out_count;
+} TestReadConfig;
+
+typedef struct test_read_data {
     NciHalClient client;
+    const TestReadConfig* config;
     GMainLoop* loop;
-    guint expected;
+    guint nout;
     int fd;
-} TestBasicRead;
+} TestRead;
 
 static
 void
-test_basic_read_proc(
+test_read_proc(
     NciHalClient* client,
     const void* data,
     guint len)
 {
-    TestBasicRead* test = G_CAST(client, TestBasicRead, client);
+    TestRead* test = G_CAST(client, TestRead, client);
+    const GUtilData* out = test->config->out + test->nout;
+    GString* buf = g_string_new(NULL);
+    guint i;
 
+    test->nout++;
+
+    g_string_append_printf(buf, "%u:", test->nout);
+    for (i = 0; i < len; i++) {
+        g_string_append_printf(buf, " %02x", ((const guint8*)data)[i]);
+    }
+    GDEBUG("%s", buf->str);
+    g_string_free(buf, TRUE);
+
+    g_assert_cmpint(out->size, ==, len);
+    g_assert(!memcmp(out->bytes, data, len));
     g_main_loop_quit(test->loop);
-    g_assert_cmpint(test->expected, ==, len);
-    g_assert_cmpint(close(test->fd), ==, 0);
-    test->fd = -1;
 }
 
 static
 void
-test_basic_read(
-    void)
+test_read(
+    gconstpointer data)
 {
     int fd[2];
-    TestBasicRead test;
+    TestRead test;
     Pn54xHalIo* hal;
     NciHalIo* io;
+    guint i;
+    const TestReadConfig* config = data;
     static const NciHalClientFunctions test_read_fn = {
-        test_no_error, test_basic_read_proc
+        test_no_error, test_read_proc
     };
-    static const guint8 resp[] = {
-        0x60, 0x08, 0x02, 0x05, 0x05, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
-    };
+
     g_assert_cmpint(socketpair(AF_UNIX, SOCK_STREAM, 0, fd), ==, 0);
     memset(&test, 0, sizeof(test));
 
@@ -193,19 +225,35 @@ test_basic_read(
     test_ioctl_ret = 0;
     test_fd = fd[0];
     test.fd = fd[1];
-    test.expected = 5;
     test.client.fn = &test_read_fn;
+    test.config = config;
+    test.loop = g_main_loop_new(NULL, FALSE);
 
     hal = pn54x_io_new("test");
     g_assert(hal);
     io = &hal->hal_io;
     io->fn->start(io, &test.client);
     pn54x_io_set_power(hal, TRUE);
-    g_assert_cmpint(write(fd[1], resp, sizeof(resp)), ==, sizeof(resp));
 
-    /* Read callback will terminate the loop */
-    test.loop = g_main_loop_new(NULL, FALSE);
-    test_run(&test_opt, test.loop);
+    for (i = 0; i < config->in_count && test.nout < config->out_count; i++) {
+        const TestReadInputChunk* in = config->in + i;
+        const GUtilData* data = &in->data;
+
+        g_assert_cmpint(write(fd[1], data->bytes, data->size), ==, data->size);
+        if (in->has_packet) {
+            GDEBUG("Waiting for incoming packet(s)...");
+            test_run(&test_opt, test.loop);
+        } else {
+            /* Give the child a chance to read the data and pass it back */
+            g_timeout_add(100, test_unblock, test.loop);
+            test_run(&test_opt, test.loop);
+        }
+    }
+
+    g_assert_cmpuint(i, == ,config->in_count);
+    g_assert_cmpuint(test.nout, == ,config->out_count);
+    g_assert_cmpint(close(test.fd), ==, 0);
+    test.fd = -1;
     io->fn->stop(io);
 
     g_main_loop_unref(test.loop);
@@ -213,6 +261,73 @@ test_basic_read(
     test_reset();
     pn54x_io_free(hal);
 }
+
+
+static const guint8 test_read_in_basic_1[] = {
+    0x60, 0x08, 0x02, 0x05, 0x05, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+};
+static const TestReadInputChunk test_read_in_basic[] = {
+    { {TEST_ARRAY_AND_SIZE(test_read_in_basic_1)}, TRUE }
+};
+static const GUtilData test_read_out_basic[] = {
+    { test_read_in_basic_1, 5 /* First 5 bytes of the input */ }
+};
+
+static const guint8 test_read_in_split_1[] = {
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff
+};
+static const guint8 test_read_in_split_2[] = {
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x60, 0x08,
+};
+static const guint8 test_read_in_split_3[] = {
+    0x02, 0xb2,
+};
+static const guint8 test_read_in_split_4[] = {
+    0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff
+};
+static const guint8 test_read_out_split_1[] = {
+    0x60, 0x08, 0x02, 0xb2, 0x00
+};
+static const TestReadInputChunk test_read_in_split[] = {
+    { {TEST_ARRAY_AND_SIZE(test_read_in_split_1)}, FALSE },
+    { {TEST_ARRAY_AND_SIZE(test_read_in_split_2)}, FALSE },
+    { {TEST_ARRAY_AND_SIZE(test_read_in_split_3)}, FALSE },
+    { {TEST_ARRAY_AND_SIZE(test_read_in_split_4)}, TRUE }
+};
+static const GUtilData test_read_out_split[] = {
+    { TEST_ARRAY_AND_SIZE(test_read_out_split_1) },
+};
+
+static const guint8 test_read_in_combined_1[] = {
+    0x60, 0x08, 0x02, 0xb2, 0x00, 0xff, 0xff, 0xff,
+    0x61, 0x06, 0x02, 0x03, 0x00, 0xff, 0xff, 0xff,
+    0xff, 0xff
+};
+static const TestReadInputChunk test_read_in_combined[] = {
+    { {TEST_ARRAY_AND_SIZE(test_read_in_combined_1)}, TRUE }
+};
+static const GUtilData test_read_out_combined[] = {
+    { test_read_in_combined_1, 5 /* First 5 bytes of the input */ },
+    { test_read_in_combined_1 + 8, 5 /* And another 5 bytes */ }
+};
+static const TestReadConfig read_tests[] = {
+    {
+        "basic",
+        TEST_ARRAY_AND_COUNT(test_read_in_basic),
+        TEST_ARRAY_AND_COUNT(test_read_out_basic)
+    },{
+        "split",
+        TEST_ARRAY_AND_COUNT(test_read_in_split),
+        TEST_ARRAY_AND_COUNT(test_read_out_split)
+    },{
+        "combined",
+        TEST_ARRAY_AND_COUNT(test_read_in_combined),
+        TEST_ARRAY_AND_COUNT(test_read_out_combined)
+    }
+};
 
 /*==========================================================================*
  * basic_write
@@ -405,15 +520,23 @@ test_write_chunks(
 
 int main(int argc, char* argv[])
 {
+    guint i;
+
     signal(SIGPIPE, SIG_IGN);
     g_test_init(&argc, &argv, NULL);
-    test_init(&test_opt, argc, argv);
     g_test_add_func(TEST_("null"), test_null);
     g_test_add_func(TEST_("open_error"), test_open_error);
-    g_test_add_func(TEST_("basic_read"), test_basic_read);
     g_test_add_func(TEST_("basic_write"), test_basic_write);
     g_test_add_func(TEST_("cancel_write"), test_cancel_write);
     g_test_add_func(TEST_("write_chunks"), test_write_chunks);
+    for (i = 0; i < G_N_ELEMENTS(read_tests); i++) {
+        const TestReadConfig* test = read_tests + i;
+        char* path = g_strconcat(TEST_("read/"), test->name, NULL);
+
+        g_test_add_data_func(path, test, test_read);
+        g_free(path);
+    }
+    test_init(&test_opt, argc, argv);
     return g_test_run();
 }
 
