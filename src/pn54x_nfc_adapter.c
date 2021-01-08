@@ -1,7 +1,7 @@
 /*
- * Copyright (C) 2019 Jolla Ltd.
+ * Copyright (C) 2019-2021 Jolla Ltd.
+ * Copyright (C) 2019-2021 Slava Monich <slava.monich@jolla.com>
  * Copyright (C) 2019 Open Mobile Platform LLC.
- * Copyright (C) 2019 Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of the BSD license as follows:
  *
@@ -73,7 +73,19 @@ pn54x_nfc_adapter_can_power_off(
 {
     NciCore* nci = self->adapter.nci;
 
-    return (nci->current_state <= NCI_RFST_IDLE);
+    if (nci->current_state <= NCI_RFST_IDLE) {
+        if (nci->current_state == NCI_RFST_IDLE) {
+            /*
+             * If this function returns TRUE, we are going to power off
+             * the chip. Make sure that state machine isn't going to
+             * continue transition to RFST_DISCOVERY which would be
+             * pointless.
+             */
+            nci_core_set_state(nci, NCI_RFST_IDLE);
+        }
+        return TRUE;
+    }
+    return FALSE;
 }
 
 static
